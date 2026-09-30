@@ -159,6 +159,20 @@ matter esp dl status
 matter esp dl users
 ```
 
+### Android and Samsung Wallet
+
+Aliro is platform-neutral at the reader protocol level. Samsung Wallet's
+[Digital Home Key](https://news.samsung.com/global/samsung-wallet-launches-digital-home-key-for-smart-door-locks)
+uses Aliro and can provide NFC tap-to-unlock on supported Samsung Galaxy devices.
+A compatible Matter lock is commissioned through SmartThings, after which the
+onboarding flow may offer adding a Digital Home Key to Samsung Wallet.
+
+This repository has not yet been validated with Samsung Wallet. Availability may
+depend on the Galaxy model, region, SmartThings and Samsung Wallet rollout, and
+whether Samsung accepts the lock implementation. A generic NFC-enabled Android
+phone is not sufficient: it must hold an Aliro credential provisioned by a
+compatible wallet or access-management system.
+
 ## Attribution design
 
 The Aliro SDK stores the public access-credential key associated with a fast
