@@ -123,32 +123,7 @@ index 71ca96fa..79788206 100644
  namespace esp_matter {
  
  #ifdef CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER
-@@ -288,6 +309,10 @@ static esp_err_t init_thread_stack_and_start_thread_task()
- {
- #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
- #ifdef CONFIG_ESP_MATTER_ENABLE_OPENTHREAD
-+    if (!network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature::kThreadNetworkInterface)) {
-+        ESP_LOGI(TAG, "Thread stack disabled by the selected Network Commissioning feature");
-+        return ESP_OK;
-+    }
-     VerifyOrReturnError(ThreadStackMgr().InitThreadStack() == CHIP_NO_ERROR, ESP_FAIL,
-                         ESP_LOGE(TAG, "Failed to initialize Thread stack"));
- #if CHIP_CONFIG_ENABLE_ICD_SERVER
-@@ -375,7 +400,12 @@ esp_err_t start(event_callback_t callback, intptr_t callback_arg)
-     // as of it means that default event loop is already initialized and no additional actions should be done.
-     VerifyOrReturnError((err == ESP_OK || err == ESP_ERR_INVALID_STATE), err, ESP_LOGE(TAG, "Error create default event loop"));
- #if CHIP_DEVICE_CONFIG_ENABLE_WIFI
--    VerifyOrReturnError(chip::DeviceLayer::Internal::ESP32Utils::InitWiFiStack() == CHIP_NO_ERROR, ESP_FAIL, ESP_LOGE(TAG, "Error initializing Wi-Fi stack"));
-+    if (network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature::kWiFiNetworkInterface)) {
-+        VerifyOrReturnError(chip::DeviceLayer::Internal::ESP32Utils::InitWiFiStack() == CHIP_NO_ERROR, ESP_FAIL,
-+                            ESP_LOGE(TAG, "Error initializing Wi-Fi stack"));
-+    } else {
-+        ESP_LOGI(TAG, "Wi-Fi stack disabled by the selected Network Commissioning feature");
-+    }
- #endif // CHIP_DEVICE_CONFIG_ENABLE_WIFI
- #ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL
-     esp_matter_ota_requestor_init();
-@@ -386,7 +416,8 @@ esp_err_t start(event_callback_t callback, intptr_t callback_arg)
+@@ -386,7 +407,8 @@ esp_err_t start(event_callback_t callback, intptr_t callback_arg)
  #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
  #if defined(CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER) && defined(CONFIG_ESP_MATTER_ENABLE_OPENTHREAD)
      // If Thread is Provisioned, publish the dns service
