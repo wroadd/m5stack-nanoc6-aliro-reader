@@ -48,21 +48,80 @@ and GPIO 20 for the RGB LED.
 No firmware image, flash dump, Matter fabric data, PIN, private key, persistent
 Aliro key, network address, or commissioned-device state is included.
 
-## Build
+## Install the prerequisites and SDKs
 
-Install ESP-IDF 6.0.2 and the prerequisites required by `esp-matter`, then:
+The commands below follow the official
+[ESP-IDF installation guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
+and the
+[ESP-Matter development guide](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html).
+
+### macOS
+
+Install the Xcode command-line tools and Homebrew packages:
 
 ```bash
-git clone --recursive https://github.com/espressif/esp-matter.git
+xcode-select --install
+brew install libgcrypt glib pixman sdl2 libslirp dfu-util cmake ninja ccache python
+```
+
+### Ubuntu or Debian
+
+Install the ESP-IDF and Matter host dependencies:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  git gcc g++ flex bison gperf pkg-config cmake curl wget ccache ninja-build \
+  python3 python3-venv python3-dev python3-pip libssl-dev libffi-dev \
+  libdbus-1-dev libglib2.0-dev libavahi-client-dev unzip \
+  libgirepository1.0-dev libcairo2-dev libreadline-dev libevent-dev \
+  default-jre dfu-util libusb-1.0-0
+```
+
+Matter requires Python 3.11 or newer. Ubuntu 22.04 users may need to install
+Python 3.11 separately before continuing.
+
+### ESP-IDF 6.0.2 and ESP-Matter
+
+Install the exact versions used by this project:
+
+```bash
+mkdir -p ~/esp
+cd ~/esp
+
+git clone --recursive --branch v6.0.2 \
+  https://github.com/espressif/esp-idf.git
+cd esp-idf
+./install.sh
+source ./export.sh
+cd ..
+
+git clone https://github.com/espressif/esp-matter.git
 cd esp-matter
 git checkout 59574f3fb62fddc690b4127fd3a4a43cfce4245e
 git submodule update --init --recursive
+./install.sh
+source ./export.sh
+```
+
+Source both environments whenever you open a new terminal:
+
+```bash
+source ~/esp/esp-idf/export.sh
+source ~/esp/esp-matter/export.sh
+```
+
+## Build and flash
+
+From the checked-out `~/esp/esp-matter` directory:
+
+```bash
+cd ~/esp/esp-matter
 
 git apply /path/to/m5stack-nanoc6-aliro-reader/patches/0001-nanoc6-aliro-credential-attribution.patch
 cp /path/to/m5stack-nanoc6-aliro-reader/config/sdkconfig.defaults.nanoc6_aliro_nfc \
   examples/door_lock/sdkconfig.defaults.nanoc6_aliro_nfc
 
-source /path/to/esp-idf-v6.0.2/export.sh
 cd examples/door_lock
 idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults.nanoc6_aliro_nfc set-target esp32c6
 idf.py build
