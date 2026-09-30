@@ -78,7 +78,7 @@ index ccc3e395..785409ed 100644
                                                                                               shutdownType));
      gServers[index].Cluster().Deinit();
 diff --git a/components/esp_matter/esp_matter_core.cpp b/components/esp_matter/esp_matter_core.cpp
-index 71ca96fa..79788206 100644
+index 71ca96fa..26b41afb 100644
 --- a/components/esp_matter/esp_matter_core.cpp
 +++ b/components/esp_matter/esp_matter_core.cpp
 @@ -22,6 +22,7 @@
@@ -133,6 +133,20 @@ index 71ca96fa..79788206 100644
              (chip::Server::GetInstance().GetFabricTable().FabricCount() != 0)) {
          LogErrorOnFailure(PlatformMgr().ScheduleWork([](intptr_t) {
              chip::app::DnssdServer::Instance().StartServer();
+diff --git a/examples/door_lock/CMakeLists.txt b/examples/door_lock/CMakeLists.txt
+index efc0ba7e..9e4e7020 100644
+--- a/examples/door_lock/CMakeLists.txt
++++ b/examples/door_lock/CMakeLists.txt
+@@ -35,6 +35,9 @@ endif()
+ 
+ idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
+ idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
++idf_build_set_property(COMPILE_OPTIONS "-DCHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME=\"wroadd\"" APPEND)
++idf_build_set_property(COMPILE_OPTIONS
++    "-DCHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME=\"M5Stack NanoC6 Aliro Reader\"" APPEND)
+ # For RISCV chips, project_include.cmake sets -Wno-format, but does not clear various
+ # flags that depend on -Wformat
+ idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
 diff --git a/examples/door_lock/main/app_driver.cpp b/examples/door_lock/main/app_driver.cpp
 index 42b1815d..90c4244b 100644
 --- a/examples/door_lock/main/app_driver.cpp
@@ -285,10 +299,18 @@ index 42b1815d..90c4244b 100644
  {
      if (BSP_LED_NUM == 0) {
 diff --git a/examples/door_lock/main/app_main.cpp b/examples/door_lock/main/app_main.cpp
-index cb48125f..8b8fada3 100644
+index cb48125f..a4056fb9 100644
 --- a/examples/door_lock/main/app_main.cpp
 +++ b/examples/door_lock/main/app_main.cpp
-@@ -20,6 +20,7 @@
+@@ -9,6 +9,7 @@
+ #include <esp_err.h>
+ #include <esp_log.h>
+ #include <nvs_flash.h>
++#include <cstring>
+ #if CONFIG_PM_ENABLE
+ #include <esp_pm.h>
+ #endif
+@@ -20,6 +21,7 @@
  #include <common_macros.h>
  #include <app_priv.h>
  #include <door_lock_capabilities.h>
@@ -296,7 +318,15 @@ index cb48125f..8b8fada3 100644
  #if CONFIG_ENABLE_CHIP_SHELL
  #include <door_lock_console.h>
  #endif // CONFIG_ENABLE_CHIP_SHELL
-@@ -139,6 +140,17 @@ extern "C" void app_main()
+@@ -43,6 +45,7 @@ using namespace chip::app::Clusters;
+ using namespace chip;
+ 
+ constexpr auto k_timeout_seconds = 300;
++constexpr char k_node_label[] = "Aliro NFC Reader";
+ 
+ #if CONFIG_ENABLE_ENCRYPTED_OTA
+ extern const char decryption_key_start[] asm("_binary_esp_image_encryption_key_pem_start");
+@@ -139,6 +142,17 @@ extern "C" void app_main()
      /* Initialize the ESP NVS layer */
      nvs_flash_init();
  
@@ -314,15 +344,19 @@ index cb48125f..8b8fada3 100644
  #if CONFIG_PM_ENABLE
      esp_pm_config_t pm_config = {
          .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-@@ -152,6 +164,7 @@ extern "C" void app_main()
+@@ -152,6 +166,11 @@ extern "C" void app_main()
  
      /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
      node::config_t node_config;
++    static_assert(sizeof(k_node_label) <= sizeof(node_config.root_node.basic_information.node_label));
++    std::memcpy(node_config.root_node.basic_information.node_label, k_node_label, sizeof(k_node_label));
++    ESP_LOGI(TAG, "Matter identity: vendor=%s, product=%s, node=%s", CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME,
++             CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME, k_node_label);
 +    node_config.root_node.network_commissioning.feature_map = app_network_mode_feature_map();
  
      // node handle can be used to add/modify other endpoints.
      node_t *node = node::create(&node_config, nullptr, app_identification_cb);
-@@ -198,8 +211,6 @@ extern "C" void app_main()
+@@ -198,8 +217,6 @@ extern "C" void app_main()
      err = esp_matter::start(app_event_cb);
      ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
  
