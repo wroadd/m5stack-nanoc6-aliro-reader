@@ -10,6 +10,30 @@ Aliro NFC unlock to the corresponding Matter user and credential.
 
 ![M5Stack NanoC6 connected to the M5Stack Unit NFC](assets/hardware-stack.jpg)
 
+## Why Matter identifies it as a door lock
+
+This hardware is an NFC credential reader, not a lock actuator. It deliberately
+exposes the Matter **Door Lock** device type (`0x000A`) because the current
+[Matter device-type list](https://project-chip.github.io/connectedhomeip-doc/ids_and_codes/spec_device_types.html)
+does not define an access keypad or credential-reader device type. Matter's
+similarly named Keypad Input cluster is intended for media-control key input,
+not physical access control.
+
+Aliro provisioning is part of the Matter Door Lock cluster. The standard user,
+credential, Aliro reader configuration, and `LockOperation` data used by this
+project are all defined there. The Door Lock Controller device type is not an
+alternative: it represents a client that controls another lock rather than a
+reader that hosts credentials. See the CSA
+[Matter Application Cluster Specification](https://csa-iot.org/wp-content/uploads/2025/08/3-27350_matter-1-4-2-adopted-application-cluster-specification.pdf)
+for the Door Lock and Aliro commands.
+
+A custom vendor-specific keypad type would require custom controller support
+and would lose standard Aliro provisioning in ecosystems such as Apple Home.
+The firmware therefore keeps the interoperable Door Lock model while using
+`M5Stack NanoC6 Aliro Reader` as its product name and `Aliro NFC Reader` as its
+node label. Controllers may still render a lock control because presentation is
+based on the standard Matter device type.
+
 ## What works
 
 - Matter commissioning over a persistent, pre-commissioning choice of Thread or
