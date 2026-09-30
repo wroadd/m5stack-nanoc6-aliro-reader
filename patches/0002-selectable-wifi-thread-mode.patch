@@ -1,0 +1,543 @@
+diff --git a/components/esp_matter/data_model_provider/clusters/network_commissioning/integration.cpp b/components/esp_matter/data_model_provider/clusters/network_commissioning/integration.cpp
+index ccc3e395..785409ed 100644
+--- a/components/esp_matter/data_model_provider/clusters/network_commissioning/integration.cpp
++++ b/components/esp_matter/data_model_provider/clusters/network_commissioning/integration.cpp
+@@ -17,6 +17,7 @@
+ #include <app/ClusterCallbacks.h>
+ #include <app/clusters/network-commissioning/NetworkCommissioningCluster.h>
+ #include <app/server/Server.h>
++#include <data_model/esp_matter_attribute_helpers.h>
+ #include <data_model/esp_matter_data_model.h>
+ #include <data_model_provider/esp_matter_data_model_provider.h>
+ #include <platform/DeviceControlServer.h>
+@@ -96,57 +97,49 @@ uint16_t GetServerIndex(EndpointId endpointId)
+     return UINT16_MAX;
+ }
+ 
+-bool endpointIdIsValid(EndpointId endpointId)
++uint32_t GetNetworkFeatureMap(EndpointId endpointId)
+ {
+-    bool endpointIdMatched = false;
+-#ifdef CONFIG_THREAD_NETWORK_COMMISSIONING_DRIVER
+-    endpointIdMatched |= endpointId == CONFIG_THREAD_NETWORK_ENDPOINT_ID;
+-#endif
+-#ifdef CONFIG_WIFI_NETWORK_COMMISSIONING_DRIVER
+-    endpointIdMatched |= endpointId == CONFIG_WIFI_NETWORK_ENDPOINT_ID;
+-#endif
+-#ifdef CONFIG_ETHERNET_NETWORK_COMMISSIONING_DRIVER
+-    endpointIdMatched |= endpointId == CONFIG_ETHERNET_NETWORK_ENDPOINT_ID;
+-#endif
+-    return endpointIdMatched;
++    return esp_matter::read_feature_map_u32(endpointId, NetworkCommissioning::Id);
+ }
+ 
+ } // namespace
+ 
+ void ESPMatterNetworkCommissioningClusterServerInitCallback(EndpointId endpointId)
+ {
+-    VerifyOrReturn(endpointIdIsValid(endpointId));
++    const uint32_t featureMap = GetNetworkFeatureMap(endpointId);
++    VerifyOrReturn(featureMap != 0);
+     uint16_t index = GetServerIndex(endpointId);
+     VerifyOrReturn(index != UINT16_MAX);
+     if (!gServers[index].IsConstructed()) {
+ #ifdef CONFIG_THREAD_NETWORK_COMMISSIONING_DRIVER
+-        if (endpointId == CONFIG_THREAD_NETWORK_ENDPOINT_ID) {
++        if ((featureMap & chip::to_underlying(NetworkCommissioning::Feature::kThreadNetworkInterface)) != 0) {
+             static DeviceLayer::NetworkCommissioning::GenericThreadDriver sThreadDriver;
+             gServers[index].Create(endpointId, &sThreadDriver, MakeNetworkCommissioningClusterContext());
+         }
+ #endif
+ #ifdef CONFIG_WIFI_NETWORK_COMMISSIONING_DRIVER
+-        if (endpointId == CONFIG_WIFI_NETWORK_ENDPOINT_ID) {
++        if ((featureMap & chip::to_underlying(NetworkCommissioning::Feature::kWiFiNetworkInterface)) != 0) {
+             gServers[index].Create(endpointId, &(DeviceLayer::NetworkCommissioning::ESPWiFiDriver::GetInstance()),
+                                    MakeNetworkCommissioningClusterContext());
+         }
+ #endif
+ #ifdef CONFIG_ETHERNET_NETWORK_COMMISSIONING_DRIVER
+-        if (endpointId == CONFIG_ETHERNET_NETWORK_ENDPOINT_ID) {
++        if ((featureMap & chip::to_underlying(NetworkCommissioning::Feature::kEthernetNetworkInterface)) != 0) {
+             gServers[index].Create(endpointId, &(DeviceLayer::NetworkCommissioning::ESPEthernetDriver::GetInstance()),
+                                    MakeNetworkCommissioningClusterContext());
+         }
+ #endif
+     }
++    VerifyOrReturn(gServers[index].IsConstructed());
+     LogErrorOnFailure(gServers[index].Cluster().Init());
+     LogErrorOnFailure(esp_matter::data_model::provider::get_instance().registry().Register(gServers[index].Registration()));
+ }
+ 
+ void ESPMatterNetworkCommissioningClusterServerShutdownCallback(EndpointId endpointId, ClusterShutdownType shutdownType)
+ {
+-    VerifyOrReturn(endpointIdIsValid(endpointId));
+     uint16_t index = GetServerIndex(endpointId);
+     VerifyOrReturn(index != UINT16_MAX);
++    VerifyOrReturn(gServers[index].IsConstructed());
+     LogErrorOnFailure(esp_matter::data_model::provider::get_instance().registry().Unregister(&gServers[index].Cluster(),
+                                                                                              shutdownType));
+     gServers[index].Cluster().Deinit();
+diff --git a/components/esp_matter/esp_matter_core.cpp b/components/esp_matter/esp_matter_core.cpp
+index 71ca96fa..79788206 100644
+--- a/components/esp_matter/esp_matter_core.cpp
++++ b/components/esp_matter/esp_matter_core.cpp
+@@ -22,6 +22,7 @@
+ #include <nvs_flash.h>
+ 
+ #include <app/server/Dnssd.h>
++#include <app-common/zap-generated/attributes/Accessors.h>
+ #ifdef CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER
+ #include <app/server/Server.h>
+ #include <esp_matter_ota.h>
+@@ -54,6 +55,7 @@
+ #include <esp_matter_ota.h>
+ #include <esp_matter_mem.h>
+ #include <esp_matter_providers.h>
++#include <data_model/esp_matter_attribute_helpers.h>
+ 
+ using chip::DeviceLayer::ChipDeviceEvent;
+ using chip::DeviceLayer::ConfigurationMgr;
+@@ -71,6 +73,25 @@ static const char *TAG = "esp_matter_core";
+ static bool esp_matter_started = false;
+ static chip::CommonCaseDeviceServerInitParams *s_server_init_params = nullptr;
+ 
++static bool network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature feature)
++{
++#ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL
++    const uint32_t feature_map = esp_matter::read_feature_map_u32(
++        0, chip::app::Clusters::NetworkCommissioning::Id);
++    if (feature_map != 0) {
++        return (feature_map & chip::to_underlying(feature)) != 0;
++    }
++    ESP_LOGE(TAG, "Unable to read Network Commissioning feature map; defaulting to the compiled transport");
++#endif
++#if CHIP_DEVICE_CONFIG_ENABLE_THREAD && !CHIP_DEVICE_CONFIG_ENABLE_WIFI
++    return feature == chip::app::Clusters::NetworkCommissioning::Feature::kThreadNetworkInterface;
++#elif CHIP_DEVICE_CONFIG_ENABLE_WIFI && !CHIP_DEVICE_CONFIG_ENABLE_THREAD
++    return feature == chip::app::Clusters::NetworkCommissioning::Feature::kWiFiNetworkInterface;
++#else
++    return feature == chip::app::Clusters::NetworkCommissioning::Feature::kThreadNetworkInterface;
++#endif
++}
++
+ namespace esp_matter {
+ 
+ #ifdef CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER
+@@ -288,6 +309,10 @@ static esp_err_t init_thread_stack_and_start_thread_task()
+ {
+ #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+ #ifdef CONFIG_ESP_MATTER_ENABLE_OPENTHREAD
++    if (!network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature::kThreadNetworkInterface)) {
++        ESP_LOGI(TAG, "Thread stack disabled by the selected Network Commissioning feature");
++        return ESP_OK;
++    }
+     VerifyOrReturnError(ThreadStackMgr().InitThreadStack() == CHIP_NO_ERROR, ESP_FAIL,
+                         ESP_LOGE(TAG, "Failed to initialize Thread stack"));
+ #if CHIP_CONFIG_ENABLE_ICD_SERVER
+@@ -375,7 +400,12 @@ esp_err_t start(event_callback_t callback, intptr_t callback_arg)
+     // as of it means that default event loop is already initialized and no additional actions should be done.
+     VerifyOrReturnError((err == ESP_OK || err == ESP_ERR_INVALID_STATE), err, ESP_LOGE(TAG, "Error create default event loop"));
+ #if CHIP_DEVICE_CONFIG_ENABLE_WIFI
+-    VerifyOrReturnError(chip::DeviceLayer::Internal::ESP32Utils::InitWiFiStack() == CHIP_NO_ERROR, ESP_FAIL, ESP_LOGE(TAG, "Error initializing Wi-Fi stack"));
++    if (network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature::kWiFiNetworkInterface)) {
++        VerifyOrReturnError(chip::DeviceLayer::Internal::ESP32Utils::InitWiFiStack() == CHIP_NO_ERROR, ESP_FAIL,
++                            ESP_LOGE(TAG, "Error initializing Wi-Fi stack"));
++    } else {
++        ESP_LOGI(TAG, "Wi-Fi stack disabled by the selected Network Commissioning feature");
++    }
+ #endif // CHIP_DEVICE_CONFIG_ENABLE_WIFI
+ #ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL
+     esp_matter_ota_requestor_init();
+@@ -386,7 +416,8 @@ esp_err_t start(event_callback_t callback, intptr_t callback_arg)
+ #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+ #if defined(CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER) && defined(CONFIG_ESP_MATTER_ENABLE_OPENTHREAD)
+     // If Thread is Provisioned, publish the dns service
+-    if (chip::DeviceLayer::ConnectivityMgr().IsThreadProvisioned() &&
++    if (network_commissioning_feature_enabled(chip::app::Clusters::NetworkCommissioning::Feature::kThreadNetworkInterface) &&
++            chip::DeviceLayer::ConnectivityMgr().IsThreadProvisioned() &&
+             (chip::Server::GetInstance().GetFabricTable().FabricCount() != 0)) {
+         LogErrorOnFailure(PlatformMgr().ScheduleWork([](intptr_t) {
+             chip::app::DnssdServer::Instance().StartServer();
+diff --git a/examples/door_lock/main/app_driver.cpp b/examples/door_lock/main/app_driver.cpp
+index 42b1815d..90c4244b 100644
+--- a/examples/door_lock/main/app_driver.cpp
++++ b/examples/door_lock/main/app_driver.cpp
+@@ -8,11 +8,17 @@
+ 
+ #include <driver/gpio.h>
+ #include <esp_log.h>
++#include <esp_matter.h>
++#include <esp_system.h>
++#include <freertos/FreeRTOS.h>
++#include <freertos/task.h>
+ 
+ #include "bsp/esp-bsp.h"
+ 
+ #include <app_priv.h>
+ #include <bolt_lock_manager.h>
++#include <network_mode.h>
++#include <app/server/Server.h>
+ #include <platform/PlatformManager.h>
+ 
+ using namespace chip::app::Clusters;
+@@ -22,6 +28,8 @@ static const char *TAG = "app_driver";
+ 
+ static button_handle_t s_button = nullptr;
+ static led_indicator_handle_t s_status_led = nullptr;
++static button_event_args_t s_factory_reset_clicks = { .multiple_clicks = { .clicks = 5 } };
++static button_event_args_t s_network_mode_clicks = { .multiple_clicks = { .clicks = 8 } };
+ 
+ static_assert(BSP_BUTTON_NUM <= 1, "The door lock supports at most one BSP button");
+ static_assert(BSP_LED_NUM <= 1, "The door lock supports at most one BSP status LED");
+@@ -57,6 +65,67 @@ static void app_driver_button_toggle_cb([[maybe_unused]] void * button_handle, [
+     }
+ }
+ 
++static void app_driver_factory_reset([[maybe_unused]] intptr_t arg)
++{
++    if (!esp_matter::is_started()) {
++        ESP_LOGW(TAG, "Ignoring factory reset before Matter startup has completed");
++        return;
++    }
++
++    ESP_LOGW(TAG, "Five clicks: performing Matter factory reset and restoring Thread as the default mode");
++    esp_err_t err = app_network_mode_set(AppNetworkMode::kThread);
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Factory reset aborted because the default network mode could not be saved: %d", err);
++        return;
++    }
++    esp_matter::factory_reset();
++}
++
++static void app_driver_button_factory_reset_cb([[maybe_unused]] void * button_handle, [[maybe_unused]] void * usr_data)
++{
++    CHIP_ERROR err = PlatformMgr().ScheduleWork(app_driver_factory_reset);
++    if (err != CHIP_NO_ERROR) {
++        ESP_LOGE(TAG, "Failed to schedule factory reset: %" CHIP_ERROR_FORMAT, err.Format());
++    }
++}
++
++static void app_driver_restart_task([[maybe_unused]] void * arg)
++{
++    vTaskDelay(pdMS_TO_TICKS(1200));
++    esp_restart();
++}
++
++static void app_driver_toggle_network_mode([[maybe_unused]] intptr_t arg)
++{
++    if (!esp_matter::is_started()) {
++        ESP_LOGW(TAG, "Ignoring network-mode switch before Matter startup has completed");
++        return;
++    }
++    if (chip::Server::GetInstance().GetFabricTable().FabricCount() != 0) {
++        ESP_LOGW(TAG, "Network mode can only be changed before commissioning; factory-reset the reader first");
++        return;
++    }
++
++    esp_err_t err = app_network_mode_toggle();
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Failed to toggle network mode: %d", err);
++        return;
++    }
++    app_driver_show_network_mode(app_network_mode_get());
++    ESP_LOGI(TAG, "Eight clicks: rebooting into %s mode", app_network_mode_name(app_network_mode_get()));
++    if (xTaskCreate(app_driver_restart_task, "network-mode-restart", 2048, nullptr, 5, nullptr) != pdPASS) {
++        ESP_LOGE(TAG, "Failed to create network-mode restart task");
++    }
++}
++
++static void app_driver_button_network_mode_cb([[maybe_unused]] void * button_handle, [[maybe_unused]] void * usr_data)
++{
++    CHIP_ERROR err = PlatformMgr().ScheduleWork(app_driver_toggle_network_mode);
++    if (err != CHIP_NO_ERROR) {
++        ESP_LOGE(TAG, "Failed to schedule network-mode switch: %" CHIP_ERROR_FORMAT, err.Format());
++    }
++}
++
+ static esp_err_t app_driver_button_init()
+ {
+     if (BSP_BUTTON_NUM == 0) {
+@@ -70,7 +139,15 @@ static esp_err_t app_driver_button_init()
+         return err;
+     }
+ 
+-    err = iot_button_register_cb(s_button, BUTTON_PRESS_DOWN, nullptr, app_driver_button_toggle_cb, nullptr);
++    err = iot_button_register_cb(s_button, BUTTON_SINGLE_CLICK, nullptr, app_driver_button_toggle_cb, nullptr);
++    if (err == ESP_OK) {
++        err = iot_button_register_cb(s_button, BUTTON_MULTIPLE_CLICK, &s_factory_reset_clicks,
++                                     app_driver_button_factory_reset_cb, nullptr);
++    }
++    if (err == ESP_OK) {
++        err = iot_button_register_cb(s_button, BUTTON_MULTIPLE_CLICK, &s_network_mode_clicks,
++                                     app_driver_button_network_mode_cb, nullptr);
++    }
+     if (err != ESP_OK) {
+         app_driver_button_deinit();
+     }
+@@ -137,6 +214,19 @@ static esp_err_t app_driver_status_led_init()
+ }
+ 
+ #if defined(CONFIG_BSP_LED_TYPE_RGB) || defined(CONFIG_BSP_LED_TYPE_RGB_CLASSIC)
++esp_err_t app_driver_show_network_mode(AppNetworkMode mode)
++{
++    if (BSP_LED_NUM == 0) {
++        return ESP_OK;
++    }
++
++    static constexpr uint8_t kNetworkLedLevel = 0x40;
++    const uint32_t color = mode == AppNetworkMode::kWiFi
++        ? SET_IRGB(0, 0, kNetworkLedLevel, kNetworkLedLevel)
++        : SET_IRGB(0, 0, 0, kNetworkLedLevel);
++    return led_indicator_set_rgb(s_status_led, color);
++}
++
+ static esp_err_t app_driver_status_led_set(BoltLockManager::State state)
+ {
+     if (BSP_LED_NUM == 0) {
+@@ -160,6 +250,14 @@ static esp_err_t app_driver_status_led_set(BoltLockManager::State state)
+     return led_indicator_set_rgb(s_status_led, color);
+ }
+ #else
++esp_err_t app_driver_show_network_mode(AppNetworkMode mode)
++{
++    if (BSP_LED_NUM == 0) {
++        return ESP_OK;
++    }
++    return led_indicator_set_on_off(s_status_led, mode == AppNetworkMode::kThread);
++}
++
+ static esp_err_t app_driver_status_led_set(BoltLockManager::State state)
+ {
+     if (BSP_LED_NUM == 0) {
+diff --git a/examples/door_lock/main/app_main.cpp b/examples/door_lock/main/app_main.cpp
+index cb48125f..8b8fada3 100644
+--- a/examples/door_lock/main/app_main.cpp
++++ b/examples/door_lock/main/app_main.cpp
+@@ -20,6 +20,7 @@
+ #include <common_macros.h>
+ #include <app_priv.h>
+ #include <door_lock_capabilities.h>
++#include <network_mode.h>
+ #if CONFIG_ENABLE_CHIP_SHELL
+ #include <door_lock_console.h>
+ #endif // CONFIG_ENABLE_CHIP_SHELL
+@@ -139,6 +140,17 @@ extern "C" void app_main()
+     /* Initialize the ESP NVS layer */
+     nvs_flash_init();
+ 
++    err = app_network_mode_init();
++    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialize network mode, err:%d", err));
++
++    err = app_driver_init();
++    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialize application driver, err:%d", err));
++    err = app_driver_show_network_mode(app_network_mode_get());
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Failed to show network mode, err:%d", err);
++    }
++    vTaskDelay(pdMS_TO_TICKS(1200));
++
+ #if CONFIG_PM_ENABLE
+     esp_pm_config_t pm_config = {
+         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+@@ -152,6 +164,7 @@ extern "C" void app_main()
+ 
+     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
+     node::config_t node_config;
++    node_config.root_node.network_commissioning.feature_map = app_network_mode_feature_map();
+ 
+     // node handle can be used to add/modify other endpoints.
+     node_t *node = node::create(&node_config, nullptr, app_identification_cb);
+@@ -198,8 +211,6 @@ extern "C" void app_main()
+     err = esp_matter::start(app_event_cb);
+     ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
+ 
+-    err = app_driver_init();
+-    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialize application driver, err:%d", err));
+     err = app_driver_set_lock_state(BoltLockManager::State::kLockingCompleted);
+     if (err != ESP_OK) {
+         ESP_LOGE(TAG, "Failed to set RGB LED state, err:%d", err);
+diff --git a/examples/door_lock/main/app_priv.h b/examples/door_lock/main/app_priv.h
+index 26e89b65..4ceaf12f 100644
+--- a/examples/door_lock/main/app_priv.h
++++ b/examples/door_lock/main/app_priv.h
+@@ -12,6 +12,8 @@
+ #include <esp_err.h>
+ #include <platform/CHIPDeviceConfig.h>
+ 
++#include "network_mode.h"
++
+ #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+ #include "esp_openthread_types.h"
+ #endif
+@@ -19,6 +21,9 @@
+ /** Initialize the configured lock button and status indicator. */
+ esp_err_t app_driver_init();
+ 
++/** Show the selected commissioning transport on the status LED. */
++esp_err_t app_driver_show_network_mode(AppNetworkMode mode);
++
+ /** Reflect the current bolt state on the board status indicator. */
+ esp_err_t app_driver_set_lock_state(BoltLockManager::State state);
+ 
+diff --git a/examples/door_lock/main/network_mode.cpp b/examples/door_lock/main/network_mode.cpp
+new file mode 100644
+index 00000000..27b02987
+--- /dev/null
++++ b/examples/door_lock/main/network_mode.cpp
+@@ -0,0 +1,110 @@
++/*
++   This example code is in the Public Domain (or CC0 licensed, at your option.)
++*/
++
++#include "network_mode.h"
++
++#include <app/clusters/network-commissioning/network-commissioning.h>
++#include <esp_log.h>
++#include <nvs.h>
++
++#include <lib/support/TypeTraits.h>
++
++namespace NetworkCommissioning = chip::app::Clusters::NetworkCommissioning;
++
++namespace {
++
++constexpr char kNamespace[] = "aliro-config";
++constexpr char kModeKey[] = "net-mode";
++constexpr AppNetworkMode kDefaultMode = AppNetworkMode::kThread;
++
++AppNetworkMode s_mode = kDefaultMode;
++const char *TAG = "network_mode";
++
++bool is_valid_mode(uint8_t value)
++{
++    return value == static_cast<uint8_t>(AppNetworkMode::kThread) ||
++           value == static_cast<uint8_t>(AppNetworkMode::kWiFi);
++}
++
++} // namespace
++
++esp_err_t app_network_mode_init()
++{
++    nvs_handle_t handle;
++    esp_err_t err = nvs_open(kNamespace, NVS_READONLY, &handle);
++    if (err == ESP_ERR_NVS_NOT_FOUND) {
++        s_mode = kDefaultMode;
++        ESP_LOGI(TAG, "No saved network mode; using %s", app_network_mode_name(s_mode));
++        return ESP_OK;
++    }
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Failed to open network-mode storage: %s", esp_err_to_name(err));
++        return err;
++    }
++
++    uint8_t stored_mode = 0;
++    err = nvs_get_u8(handle, kModeKey, &stored_mode);
++    nvs_close(handle);
++
++    if (err == ESP_ERR_NVS_NOT_FOUND || !is_valid_mode(stored_mode)) {
++        s_mode = kDefaultMode;
++        ESP_LOGW(TAG, "Saved network mode is missing or invalid; using %s", app_network_mode_name(s_mode));
++        return ESP_OK;
++    }
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Failed to read network mode: %s", esp_err_to_name(err));
++        return err;
++    }
++
++    s_mode = static_cast<AppNetworkMode>(stored_mode);
++    ESP_LOGI(TAG, "Selected network mode: %s", app_network_mode_name(s_mode));
++    return ESP_OK;
++}
++
++AppNetworkMode app_network_mode_get()
++{
++    return s_mode;
++}
++
++const char *app_network_mode_name(AppNetworkMode mode)
++{
++    return mode == AppNetworkMode::kWiFi ? "Wi-Fi" : "Thread";
++}
++
++uint32_t app_network_mode_feature_map()
++{
++    const auto feature = s_mode == AppNetworkMode::kWiFi
++        ? NetworkCommissioning::Feature::kWiFiNetworkInterface
++        : NetworkCommissioning::Feature::kThreadNetworkInterface;
++    return chip::to_underlying(feature);
++}
++
++esp_err_t app_network_mode_set(AppNetworkMode mode)
++{
++    nvs_handle_t handle;
++    esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &handle);
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "Failed to open network-mode storage for writing: %s", esp_err_to_name(err));
++        return err;
++    }
++
++    err = nvs_set_u8(handle, kModeKey, static_cast<uint8_t>(mode));
++    if (err == ESP_OK) {
++        err = nvs_commit(handle);
++    }
++    nvs_close(handle);
++
++    if (err == ESP_OK) {
++        s_mode = mode;
++        ESP_LOGI(TAG, "Saved network mode: %s", app_network_mode_name(s_mode));
++    } else {
++        ESP_LOGE(TAG, "Failed to save network mode: %s", esp_err_to_name(err));
++    }
++    return err;
++}
++
++esp_err_t app_network_mode_toggle()
++{
++    return app_network_mode_set(s_mode == AppNetworkMode::kThread ? AppNetworkMode::kWiFi : AppNetworkMode::kThread);
++}
+diff --git a/examples/door_lock/main/network_mode.h b/examples/door_lock/main/network_mode.h
+new file mode 100644
+index 00000000..80f22167
+--- /dev/null
++++ b/examples/door_lock/main/network_mode.h
+@@ -0,0 +1,26 @@
++/*
++   This example code is in the Public Domain (or CC0 licensed, at your option.)
++*/
++
++#pragma once
++
++#include <esp_err.h>
++#include <stdint.h>
++
++enum class AppNetworkMode : uint8_t {
++    kThread = 0,
++    kWiFi = 1,
++};
++
++/** Load the persistent network mode. Missing or invalid data defaults to Thread. */
++esp_err_t app_network_mode_init();
++
++AppNetworkMode app_network_mode_get();
++const char *app_network_mode_name(AppNetworkMode mode);
++uint32_t app_network_mode_feature_map();
++
++/** Persist a mode. The new value is used after reboot. */
++esp_err_t app_network_mode_set(AppNetworkMode mode);
++
++/** Persist the other mode. The new value is used after reboot. */
++esp_err_t app_network_mode_toggle();
+diff --git a/examples/door_lock/partitions_nanoc6_dual_transport.csv b/examples/door_lock/partitions_nanoc6_dual_transport.csv
+new file mode 100644
+index 00000000..aaf5035d
+--- /dev/null
++++ b/examples/door_lock/partitions_nanoc6_dual_transport.csv
+@@ -0,0 +1,8 @@
++# Name,   Type, SubType, Offset,  Size, Flags
++esp_secure_cert,  0x3F, ,         0xD000,   0x2000,  encrypted
++nvs,              data, nvs,      0x10000,  0xC000,
++nvs_keys,         data, nvs_keys, ,         0x1000,  encrypted
++phy_init,         data, phy,      ,         0x1000,
++factory,          app,  factory,  0x20000,  0x3B0000,
++fctry,            data, nvs,      0x3D0000, 0x6000
++coredump,         data, coredump, ,         0x10000

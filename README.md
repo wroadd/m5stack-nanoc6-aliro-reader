@@ -12,7 +12,8 @@ Aliro NFC unlock to the corresponding Matter user and credential.
 
 ## What works
 
-- Matter commissioning over Thread
+- Matter commissioning over a persistent, pre-commissioning choice of Thread or
+  Wi-Fi
 - Apple Home Key provisioning through Apple Home
 - Aliro NFC standard and fast transactions
 - M5Stack Unit NFC over I2C using its ST25R3916 controller
@@ -42,9 +43,12 @@ and GPIO 20 for the RGB LED.
 ## Repository layout
 
 - `patches/0001-nanoc6-aliro-credential-attribution.patch` contains the
-  `esp-matter` door-lock changes.
+  Aliro credential-attribution changes.
+- `patches/0002-selectable-wifi-thread-mode.patch` adds the persistent
+  Wi-Fi/Thread selector, button gestures, boot indication, and the 4 MB
+  single-application partition layout required by the dual-transport build.
 - `config/sdkconfig.defaults.nanoc6_aliro_nfc` contains the tested ESP32-C6,
-  Thread, console, board, and NFC configuration.
+  Wi-Fi, Thread, console, board, and NFC configuration.
 - `SECURITY.md` documents the security boundary and production caveats.
 
 No firmware image, flash dump, Matter fabric data, PIN, private key, persistent
@@ -121,6 +125,7 @@ From the checked-out `~/esp/esp-matter` directory:
 cd ~/esp/esp-matter
 
 git apply /path/to/m5stack-nanoc6-aliro-reader/patches/0001-nanoc6-aliro-credential-attribution.patch
+git apply /path/to/m5stack-nanoc6-aliro-reader/patches/0002-selectable-wifi-thread-mode.patch
 cp /path/to/m5stack-nanoc6-aliro-reader/config/sdkconfig.defaults.nanoc6_aliro_nfc \
   examples/door_lock/sdkconfig.defaults.nanoc6_aliro_nfc
 
@@ -133,10 +138,38 @@ idf.py -p /dev/your-device-port flash monitor
 The ESP-IDF component manager downloads the declared Aliro and M5Stack NFC
 dependencies during configuration.
 
+## Select Wi-Fi or Thread before commissioning
+
+The firmware compiles both transports but starts exactly one of them. Thread is
+the default after the first flash and after a factory reset. The selected mode
+is stored in NVS and survives normal reboots.
+
+At boot, the NanoC6 RGB LED shows the selected transport for approximately 1.2
+seconds:
+
+- blue: Thread
+- cyan: Wi-Fi
+
+Use the NanoC6 button before adding the reader to a Matter fabric:
+
+- one click: toggle the example lock state, as in the upstream door-lock sample
+- five consecutive clicks: perform a full Matter factory reset, erase fabric,
+  network, and provisioned Aliro credential state, and restore Thread as the
+  default transport
+- eight consecutive clicks: toggle Thread/Wi-Fi, show the newly selected color,
+  and reboot into that mode
+
+The eight-click selector is accepted only while the device has no commissioned
+Matter fabric. If it is already paired, first use the five-click factory reset,
+then use eight clicks to select the other transport. Multi-click actions run
+only after the click sequence has ended, so the five-click action does not fire
+on the way to eight clicks.
+
 ## Commissioning and validation
 
 1. Flash the firmware and use the Matter onboarding information printed by the
-   example to add the lock to Apple Home.
+   example to add the lock to Apple Home or another compatible Matter
+   controller. Select Wi-Fi or Thread with the button before this step.
 2. Allow Apple Home to provision Home Key credentials.
 3. Present the iPhone or Apple Watch to the NFC reader.
 4. Confirm that the serial log reports a successful Aliro transaction and a
@@ -188,6 +221,15 @@ to a Matter controller or higher-level automation system.
 ## Important limitations
 
 - This is a reference implementation, not a production access-control product.
+- The 4 MB NanoC6 flash cannot hold two copies of the dual-transport firmware.
+  This build therefore uses one large factory application partition and does
+  not provide two-slot OTA updates or OTA rollback. Updating it requires a
+  wired flash unless a different, sufficiently large flash layout is used.
+- Runtime switching is intentionally unsupported. The transport can only be
+  changed while the reader is uncommissioned and takes effect after reboot.
+- The transport selector patches internal `esp-matter` startup and Network
+  Commissioning integration at the pinned commit. Revalidate it after any SDK
+  upgrade.
 - The attribution code currently relies on the internal NVS schema used by the
   tested `esp_aliro_lib` version. Revalidate it after any SDK upgrade.
 - The upstream door-lock example simulates actuator movement. Add independently
