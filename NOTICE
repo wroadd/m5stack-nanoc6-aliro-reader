@@ -1,0 +1,17 @@
+M5Stack NanoC6 Aliro NFC Reader
+
+This project contains a patch derived from and intended for Espressif's
+esp-matter door-lock example:
+https://github.com/espressif/esp-matter
+
+It also depends on Espressif's esp-aliro project and the M5Stack Unit NFC
+component:
+https://github.com/espressif/esp-aliro
+https://github.com/m5stack/M5Unit-NFC
+
+The upstream projects and their respective components remain subject to their
+own copyright notices and licenses.
+
+Aliro is a specification of the Connectivity Standards Alliance. Apple, Apple
+Home, Apple Home Key, iPhone, and Apple Watch are trademarks of Apple Inc.
+M5Stack is a trademark of M5Stack Technology Co., Ltd.
