@@ -1,12 +1,14 @@
 # M5Stack NanoC6 Aliro NFC Reader
 
 Experimental Aliro-compatible NFC reader and Matter door-lock reference for the
-[M5Stack NanoC6](https://docs.m5stack.com/) and
+[M5Stack NanoC6](https://docs.m5stack.com/en/core/M5NanoC6) and
 [M5Stack Unit NFC](https://docs.m5stack.com/en/unit/Unit_NFC).
 
 This project adapts Espressif's `esp-matter` door-lock example for the NanoC6,
 provisions Apple Home Key credentials through Matter, and attributes a successful
 Aliro NFC unlock to the corresponding Matter user and credential.
+
+![M5Stack NanoC6 connected to the M5Stack Unit NFC](assets/hardware-stack.jpg)
 
 ## What works
 
@@ -27,7 +29,7 @@ implementation also handles non-evictable endpoint keys.
 
 | Component | Tested version |
 | --- | --- |
-| Hardware | M5Stack NanoC6 + M5Stack Unit NFC |
+| Hardware | [M5Stack NanoC6](https://docs.m5stack.com/en/core/M5NanoC6) + [M5Stack Unit NFC](https://docs.m5stack.com/en/unit/Unit_NFC) |
 | ESP-IDF | `v6.0.2` |
 | esp-matter | `59574f3fb62fddc690b4127fd3a4a43cfce4245e` |
 | connectedhomeip submodule | `539342f32d5f4dc93761c2f9325afe29270068f1` |
