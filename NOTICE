@@ -1,5 +1,7 @@
 M5Stack NanoC6 Aliro NFC Reader
 
+Original contributions in this repository are licensed under the MIT License.
+
 This project contains a patch derived from and intended for Espressif's
 esp-matter door-lock example:
 https://github.com/espressif/esp-matter

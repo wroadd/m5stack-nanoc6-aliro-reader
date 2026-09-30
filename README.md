@@ -176,12 +176,11 @@ to a Matter controller or higher-level automation system.
   tested `esp_aliro_lib` version. Revalidate it after any SDK upgrade.
 - The upstream door-lock example simulates actuator movement. Add independently
   reviewed hardware, safety, and failure handling before controlling a real door.
-- Home Assistant and alarm-system integration are intentionally outside this
-  repository.
 - Aliro controller behavior and credential layout may vary across ecosystems and
   future software releases.
 
 ## License and attribution
 
-Licensed under Apache License 2.0. The patch modifies Espressif's `esp-matter`
-door-lock example. See `NOTICE` and the upstream project licenses for details.
+The original work in this repository is licensed under the MIT License. The patch
+targets Espressif's `esp-matter` door-lock example; upstream files and dependencies
+remain subject to their own licenses. See `NOTICE` for details.
